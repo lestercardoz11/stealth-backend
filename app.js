@@ -10,12 +10,18 @@ const docService = require('./services/doc-service');
 const ocrService = require('./services/ocr-service');
 const storageService = require('./services/storage-service');
 
+// Import new route modules
+const conversationsRouter = require('./routes/conversations');
+const chatRouter = require('./routes/chat');
+const documentsRouter = require('./routes/documents');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Create temp directory for temporary file processing
 const tempDir = path.join(__dirname, 'temp');
@@ -141,6 +147,11 @@ app.get('/supported-formats', (req, res) => {
     }
   });
 });
+
+// Mount new API routes
+app.use('/api/conversations', conversationsRouter);
+app.use('/api/chat', chatRouter);
+app.use('/api/documents', documentsRouter);
 
 app.post('/extract', upload.single('file'), async (req, res) => {
   try {
