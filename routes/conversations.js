@@ -37,6 +37,8 @@ router.post('/generate-title',
 
     if (!profile || profile.status !== 'approved') {
       return res.status(constants.HTTP_STATUS.FORBIDDEN).json({
+          }
+      )
     }
 
     // Verify user owns this conversation
@@ -48,6 +50,8 @@ router.post('/generate-title',
 
     if (convError || !conversation || conversation.user_id !== user.id) {
       return res.status(constants.HTTP_STATUS.NOT_FOUND).json({
+          }
+      )
     }
 
     const conversationText = messages
@@ -70,6 +74,8 @@ router.post('/generate-title',
         userId: user.id 
       });
       return res.status(constants.HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+          }
+      )
     }
 
     logger.info('Conversation title generated successfully', {
