@@ -1,15 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
+const constants = require('../config/constants');
+const logger = require('../config/logger');
+const { asyncHandler } = require('../middleware/error-handler');
+const { validateInput, validationRules } = require('../middleware/security');
+const { validate, validationSchemas } = require('../utils/validation');
 
 // Generate conversation title
-router.post('/generate-title', async (req, res) => {
-  try {
+router.post('/generate-title',
+  validate(validationSchemas.generateTitle),
+  asyncHandler(async (req, res) => {
     const { conversationId, messages } = req.body;
-
-    if (!conversationId || !messages || messages.length === 0) {
-      return res.status(400).json({ error: 'Invalid request' });
-    }
 
     // Check if user is authenticated and approved
     const authHeader = req.headers.authorization;
@@ -21,7 +23,9 @@ router.post('/generate-title', async (req, res) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
 
     if (authError || !user) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return res.status(constants.HTTP_STATUS.UNAUTHORIZED).json({ 
+        error: constants.ERRORS.UNAUTHORIZED 
+      });
     }
 
     // Check user profile and status
@@ -32,7 +36,7 @@ router.post('/generate-title', async (req, res) => {
       .single();
 
     if (!profile || profile.status !== 'approved') {
-      return res.status(403).json({ error: 'Account not approved' });
+      return res.status(constants.HTTP_STATUS.FORBIDDEN).json({
     }
 
     // Verify user owns this conversation
@@ -43,7 +47,7 @@ router.post('/generate-title', async (req, res) => {
       .single();
 
     if (convError || !conversation || conversation.user_id !== user.id) {
-      return res.status(404).json({ error: 'Conversation not found' });
+      return res.status(constants.HTTP_STATUS.NOT_FOUND).json({
     }
 
     const conversationText = messages
@@ -60,16 +64,23 @@ router.post('/generate-title', async (req, res) => {
       .eq('id', conversationId);
 
     if (updateError) {
-      console.error('Error updating conversation title:', updateError);
-      return res.status(500).json({ error: 'Failed to update title' });
+      logger.error('Error updating conversation title', { 
+        error: updateError.message, 
+        conversationId, 
+        userId: user.id 
+      });
+      return res.status(constants.HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
     }
 
+    logger.info('Conversation title generated successfully', {
+      conversationId,
+      userId: user.id,
+      title: cleanTitle,
+    });
+
     res.json({ title: cleanTitle });
-  } catch (error) {
-    console.error('Generate title error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
+  })
+);
 
 // Simple title generation function (replace with your AI service)
 function generateSimpleTitle(conversationText) {

@@ -1,27 +1,76 @@
 const express = require('express');
-const cors = require('cors');
+const compression = require('compression');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
+// Import configuration and utilities
+const constants = require('./config/constants');
+const logger = require('./config/logger');
+
+// Import security middleware
+const {
+  securityHeaders,
+  globalRateLimit,
+  sanitizeInput,
+} = require('./middleware/security');
+
+// Import error handling
+const {
+  globalErrorHandler,
+  notFoundHandler,
+  asyncHandler,
+} = require('./middleware/error-handler');
+
+// Import request logging
+const {
+  addRequestId,
+  requestLogger,
+  performanceMonitor,
+} = require('./middleware/request-logger');
+
+// Import services
 const pdfService = require('./services/pdf-service');
 const docService = require('./services/doc-service');
 const ocrService = require('./services/ocr-service');
 const storageService = require('./services/storage-service');
 
-// Import new route modules
+// Import route modules
 const conversationsRouter = require('./routes/conversations');
 const chatRouter = require('./routes/chat');
 const documentsRouter = require('./routes/documents');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = constants.SERVER.PORT;
 
-// Middleware
-app.use(cors());
+// Trust proxy for accurate IP addresses
+app.set('trust proxy', 1);
+
+// Security middleware (must be first)
+app.use(securityHeaders);
+app.use(globalRateLimit);
+
+// Request processing middleware
+app.use(compression());
+app.use(addRequestId);
+app.use(requestLogger);
+app.use(performanceMonitor);
+
+// CORS configuration
+const corsOptions = {
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
+  credentials: true,
+  optionsSuccessStatus: 200,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+};
+app.use(require('cors')(corsOptions));
+
+// Body parsing middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(sanitizeInput);
 
 // Create temp directory for temporary file processing
 const tempDir = path.join(__dirname, 'temp');
@@ -95,20 +144,26 @@ const initializeApp = async () => {
   try {
     const bucketInitialized = await storageService.initializeBucket();
     if (!bucketInitialized) {
-      console.warn('⚠️ Warning: Could not initialize Supabase Storage bucket');
+      logger.warn('Could not initialize Supabase Storage bucket');
+      logger.info('Supabase Storage bucket initialized successfully');
     }
   } catch (error) {
-    console.error('❌ Error initializing app:', error);
+    logger.error('Error initializing application', { error: error.message });
   }
 };
 // Routes
 app.get('/', (req, res) => {
   res.json({
     message: 'Text Extraction Microservices API',
-    version: '1.0.0',
+    version: constants.SERVER.API_VERSION,
+    environment: constants.SERVER.NODE_ENV,
     storage: 'Supabase Storage',
+    timestamp: new Date().toISOString(),
     endpoints: {
       '/extract': 'POST - Upload file for text extraction',
+      '/api/conversations': 'Conversation management endpoints',
+      '/api/chat': 'Chat and AI interaction endpoints',
+      '/api/documents': 'Document management endpoints',
       '/health': 'GET - Health check',
       '/supported-formats': 'GET - List supported file formats'
     }
@@ -118,13 +173,18 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
     timestamp: new Date().toISOString(),
     storage: 'supabase',
     services: {
       pdf: 'online',
       doc: 'online',
-      ocr: 'online'
-    }
+      ocr: 'online',
+      storage: 'online',
+    },
+    version: constants.SERVER.API_VERSION,
+    environment: constants.SERVER.NODE_ENV,
   });
 });
 
@@ -153,10 +213,10 @@ app.use('/api/conversations', conversationsRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/documents', documentsRouter);
 
-app.post('/extract', upload.single('file'), async (req, res) => {
-  try {
+// Wrap the extract endpoint with async handler and enhanced error handling
+app.post('/extract', upload.single('file'), asyncHandler(async (req, res) => {
     if (!req.file) {
-      return res.status(400).json({
+      return res.status(constants.HTTP_STATUS.BAD_REQUEST).json({
         error: 'No file uploaded',
         message: 'Please upload a file to extract text from'
       });
@@ -164,14 +224,23 @@ app.post('/extract', upload.single('file'), async (req, res) => {
 
     const { mimetype, originalname, size, path: tempFilePath } = req.file;
     
-    console.log(`Processing file: ${originalname} (${mimetype}, ${size} bytes)`);
+    logger.info('Processing file for text extraction', {
+      filename: originalname,
+      mimetype,
+      size,
+      requestId: req.id,
+    });
 
     let storageInfo = null;
     let downloadedFilePath = null;
 
     try {
       storageInfo = await storageService.uploadFile(tempFilePath, originalname, mimetype);
-      console.log(`File uploaded to storage: ${storageInfo.path}`);
+      logger.info('File uploaded to storage', {
+        path: storageInfo.path,
+        filename: originalname,
+        requestId: req.id,
+      });
 
       // Download file from storage for processing
       downloadedFilePath = await storageService.downloadFile(storageInfo.path);
@@ -185,7 +254,7 @@ app.post('/extract', upload.single('file'), async (req, res) => {
         if (downloadedFilePath) storageService.cleanupTempFile(downloadedFilePath);
         if (storageInfo) await storageService.deleteFile(storageInfo.path);
         
-        return res.status(400).json({
+        return res.status(constants.HTTP_STATUS.BAD_REQUEST).json({
           error: 'Unsupported file type',
           message: 'Please upload a PDF, DOC, DOCX, or image file'
         });
@@ -197,6 +266,13 @@ app.post('/extract', upload.single('file'), async (req, res) => {
       // Clean up temporary files (keep the file in Supabase Storage)
       cleanupTempFile(tempFilePath);
       if (downloadedFilePath) storageService.cleanupTempFile(downloadedFilePath);
+
+      logger.info('Text extraction completed successfully', {
+        filename: originalname,
+        textLength: result.text.length,
+        processingTime: result.processingTime,
+        requestId: req.id,
+      });
 
       // Return the extracted text
       res.json({
@@ -215,7 +291,11 @@ app.post('/extract', upload.single('file'), async (req, res) => {
       });
 
     } catch (storageError) {
-      console.error('Storage operation error:', storageError);
+      logger.error('Storage operation error', {
+        error: storageError.message,
+        filename: originalname,
+        requestId: req.id,
+      });
       
       // Clean up files on storage error
       cleanupTempFile(tempFilePath);
@@ -224,52 +304,25 @@ app.post('/extract', upload.single('file'), async (req, res) => {
       
       throw storageError;
     }
+}));
 
-  } catch (error) {
-    console.error('Text extraction error:', error);
-    
-    // Clean up temp file in case of error
-    if (req.file && req.file.path) {
-      cleanupTempFile(req.file.path);
-    }
+// Global error handling middleware
+app.use(globalErrorHandler);
 
-    res.status(500).json({
-      error: 'Text extraction failed',
-      message: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
-});
-
-// Error handling middleware
-app.use((error, req, res, next) => {
-  if (error instanceof multer.MulterError) {
-    if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({
-        error: 'File too large',
-        message: 'File size must be less than 10MB'
-      });
-    }
-  }
-  
-  res.status(500).json({
-    error: 'Internal server error',
-    message: error.message
-  });
-});
-
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    error: 'Not found',
-    message: 'The requested endpoint does not exist'
-  });
-});
+// 404 handler (must be last)
+app.use(notFoundHandler);
 
 app.listen(PORT, () => {
+  logger.info('Server started successfully', {
+    port: PORT,
+    environment: constants.SERVER.NODE_ENV,
+    version: constants.SERVER.API_VERSION,
+    tempDir,
+  });
+  
   console.log(`🚀 Text Extraction API running on port ${PORT}`);
+  console.log(`🌍 Environment: ${constants.SERVER.NODE_ENV}`);
   console.log(`☁️ Using Supabase Storage for file uploads`);
-  console.log(`📁 Temp directory: ${tempDir}`);
   console.log(`🔗 API endpoint: http://localhost:${PORT}`);
   
   // Initialize app

@@ -1,17 +1,40 @@
 # Text Extraction Microservices API
 
-A Node.js microservices backend that extracts text from PDF files, DOC/DOCX documents, and images using OCR technology. Files are stored securely in Supabase Storage.
+A production-ready Node.js microservices backend that extracts text from PDF files, DOC/DOCX documents, and images using OCR technology. Features enterprise-grade security, comprehensive logging, and robust error handling.
 
 ## Features
 
+### Core Functionality
 - **PDF Text Extraction**: Extract text from PDF documents with metadata
 - **Document Processing**: Extract text from DOC and DOCX files
 - **OCR Support**: Extract text from images using Tesseract.js
 - **Multi-language OCR**: Support for multiple languages
 - **Cloud Storage**: Secure file storage using Supabase Storage
+- **Chat API**: AI-powered chat with document context
+- **Document Management**: Full CRUD operations for documents
+- **Conversation Management**: Chat history and title generation
+
+### Security & Compliance
+- **Enterprise Security**: Helmet.js security headers, CORS, CSP
+- **Rate Limiting**: Multi-tier protection against abuse
+- **Input Validation**: Comprehensive validation using Joi and express-validator
+- **Audit Logging**: Security event tracking and compliance logging
+- **File Security**: Magic number validation, content verification
+- **Authentication**: JWT-based auth with Supabase integration
+
+### Monitoring & Observability
+- **Structured Logging**: Winston-based logging with multiple transports
+- **Performance Monitoring**: Request timing and memory usage tracking
+- **Health Checks**: Comprehensive health endpoints
+- **Error Tracking**: Detailed error logging and alerting
+- **Request Tracing**: Unique request IDs for debugging
+
+### Developer Experience
 - **File Validation**: Comprehensive file type and size validation
 - **Error Handling**: Robust error handling and logging
 - **RESTful API**: Clean API endpoints with JSON responses
+- **Code Quality**: ESLint configuration and Jest testing setup
+- **Documentation**: Comprehensive API documentation
 
 ## Supported File Types
 

@@ -84,27 +84,26 @@ This is a mock response. Please integrate with your preferred AI service.`;
 }
 
 // Chat stream endpoint
-router.post('/stream', async (req, res) => {
-  try {
-    console.log('Chat stream API called');
+router.post('/stream',
+  chatRateLimit,
+  validate(validationSchemas.chatRequest),
+  asyncHandler(async (req, res) => {
+    logger.info('Chat stream API called', { requestId: req.id });
 
-    const clientIP = req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.ip || 'unknown';
     const { messages, documentIds } = req.body;
 
-    console.log('Chat request:', {
+    logger.info('Chat request details', {
       messagesCount: messages?.length,
       documentIds,
+      requestId: req.id,
     });
 
     const userQuery = messages[messages.length - 1]?.content;
 
     if (!userQuery) {
-      return res.status(400).json({ error: 'No query provided' });
-    }
-
-    // Input validation
-    if (userQuery.length > 10000) {
-      return res.status(400).json({ error: 'Query too long' });
+      return res.status(constants.HTTP_STATUS.BAD_REQUEST).json({ 
+        error: 'No query provided' 
+      });
     }
 
     // Check if user mentions attachments

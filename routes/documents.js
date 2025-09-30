@@ -6,6 +6,12 @@ const mammoth = require('mammoth');
 const pdfParse = require('pdf-parse');
 const router = express.Router();
 const supabase = require('../config/supabase');
+const constants = require('../config/constants');
+const logger = require('../config/logger');
+const { asyncHandler } = require('../middleware/error-handler');
+const { uploadRateLimit, validateFile, validateInput, validationRules } = require('../middleware/security');
+const { validate, validationSchemas } = require('../utils/validation');
+const { auditLogger, AUDIT_ACTIONS } = require('../utils/audit-logger');
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -21,20 +27,18 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 50 * 1024 * 1024 // 50MB limit
+    fileSize: constants.FILES.MAX_SIZE.DOCUMENT
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = [
-      'application/pdf',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/msword',
-      'text/plain'
+      ...constants.FILES.ALLOWED_TYPES.PDF,
+      ...constants.FILES.ALLOWED_TYPES.DOCUMENT,
     ];
     
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Unsupported file type'), false);
+      cb(new Error(constants.ERRORS.INVALID_FILE_TYPE), false);
     }
   }
 });
@@ -188,25 +192,31 @@ router.get('/', async (req, res) => {
 });
 
 // POST /documents - Upload document
-router.post('/', upload.single('file'), async (req, res) => {
-  try {
-    console.log('Document upload API called');
+router.post('/', 
+  uploadRateLimit,
+  upload.single('file'),
+  validateFile,
+  validate(validationSchemas.uploadDocument),
+  asyncHandler(async (req, res) => {
+    logger.info('Document upload API called', { requestId: req.id });
 
-    const clientIP = req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.ip || 'unknown';
     const { title, isCompanyWide } = req.body;
     const file = req.file;
 
-    console.log('Upload request data:', {
+    logger.info('Upload request data', {
       fileName: file?.originalname,
       fileSize: file?.size,
       fileType: file?.mimetype,
       title,
       isCompanyWide,
+      requestId: req.id,
     });
 
     if (!file || !title) {
-      console.error('Missing file or title');
-      return res.status(400).json({ error: 'File and title are required' });
+      logger.error('Missing file or title', { requestId: req.id });
+      return res.status(constants.HTTP_STATUS.BAD_REQUEST).json({ 
+        error: 'File and title are required' 
+      });
     }
 
     // Authentication
