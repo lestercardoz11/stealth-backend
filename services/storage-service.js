@@ -4,7 +4,7 @@ const path = require('path');
 
 class StorageService {
   constructor() {
-    this.bucketName = 'document-uploads';
+    this.bucketName = 'documents';
   }
 
   // Initialize storage bucket if it doesn't exist
